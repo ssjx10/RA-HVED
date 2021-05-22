@@ -132,31 +132,6 @@ def compute_KLD_drop(mu_list, logvar_list, drop, choices=[0,1,2,3]):
 
     return 1/7*sum_inter_KLD, sum_prior_KLD
 
-def compute_KLD2(mu_list, logvar_list, subset_index_list, choices=[0,1,2,3]):
-    # Prior parameters : list[0]
-    # _list -> 0 : prior, 1~N : modality
-    mu_prior = mu_list[0]
-#     print(mu_prior.shape)
-    logvar_prior = logvar_list[0]
-    
-    experts = ProductOfExperts()
-    # Full modalities
-    full_mu, full_logvar = experts(mu_list, logvar_list, choices)
-    # Initialization sums
-    sum_prior_KLD = 0
-
-    #sum_prior_KLD += KL_divergence(full_mu, full_logvar, mu_prior, logvar_prior)
-#     subset_index_list = np.random.choice(range(4,14), 3, replace=False)
-    for idx, subset in enumerate(SUBSETS_MODALITIES):
-        if idx < 4 or idx == 14 or idx in subset_index_list:
-#             print(subset)
-            sub_mu, sub_logvar = experts(mu_list, logvar_list, subset)
-
-            # Modality to 0,1
-            sub_prior_KLD = KL_divergence(sub_mu, sub_logvar, mu_prior, logvar_prior)
-            sum_prior_KLD += sub_prior_KLD
-
-    return 1/8*sum_prior_KLD
 
 def boundary_loss(outputs_soft, gt_sdf):
     """
