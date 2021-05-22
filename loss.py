@@ -99,7 +99,6 @@ def compute_KLD(mu_list, logvar_list, subset_index_list=[14], choices=[0,1,2,3])
     # Full modalities
 #     full_mu, full_logvar = experts(mu_list, logvar_list, choices)
     # Initialization sums
-    sum_inter_KLD = 0
     sum_prior_KLD = 0
 
     #sum_prior_KLD += KL_divergence(full_mu, full_logvar, mu_prior, logvar_prior)
@@ -108,18 +107,12 @@ def compute_KLD(mu_list, logvar_list, subset_index_list=[14], choices=[0,1,2,3])
     for idx, subset in enumerate(SUBSETS_MODALITIES):
         if idx in subset_index_list:
             cnt += 1
-#             print(subset)
             sub_mu, sub_logvar = experts(mu_list, logvar_list, subset)
-
-            # Inter modality KLD ????
-#             if idx != 14:
-#                 sub_inter_KLD = KL_divergence(full_mu, full_logvar, sub_mu, sub_logvar)
-#                 sum_inter_KLD += sub_inter_KLD
 
             # Modality to 0,1
             sub_prior_KLD = KL_divergence(sub_mu, sub_logvar, mu_prior, logvar_prior)
             sum_prior_KLD += sub_prior_KLD
-    return 1/cnt*sum_inter_KLD, 1/cnt*sum_prior_KLD
+    return 1/cnt*sum_prior_KLD
 
 def compute_KLD_drop(mu_list, logvar_list, drop, choices=[0,1,2,3]):
     mu_prior = mu_list[0]
