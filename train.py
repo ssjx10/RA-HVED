@@ -61,9 +61,6 @@ if __name__ == '__main__':
     ov_validloader = torch.utils.data.DataLoader(ov_validset, batch_size=1,
                                               shuffle=False, num_workers=4)
 
-    ov_testset = GBMset(sorted(idx_test), transform=transforms())
-    ov_testloader = torch.utils.data.DataLoader(ov_testset, batch_size=1,
-                                              shuffle=False, num_workers=4)
     '''model setting'''
     n_class = 3
     model = U_HVEDNet3D(1, n_class,  multi_stream = 4, fusion_level = 4,
@@ -79,9 +76,10 @@ if __name__ == '__main__':
     model.to(device)
     disc.to(device)
 
-    print_every = 20
     num_epochs= 300
+    print_every = 20
     validate_every = 20
+    overlapEval_every = 80
     dir_name = 'model'
 
     learning_rate = 0.0001
@@ -263,11 +261,9 @@ if __name__ == '__main__':
                           va_loss, va_dice, va_wt_dice, va_tc_dice, va_ec_dice,
                          va_wt_dice_m, va_tc_dice_m, va_ec_dice_m))
 
-        if (i + 1) == num_epochs or (i + 1) % 20 == 0:
-            print(eval_overlap(ov_testloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
-        if (i + 1) == num_epochs or (i + 1) % 80 == 0:
+        if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
             print(eval_overlap(ov_validloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
-        if (i + 1) == num_epochs or (i + 1) % 80 == 0:
+        if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
             print(eval_overlap(ov_trainloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
         if (i+1) >= 160 and (i + 1) % 10 == 0:
             save_dir = dir_name + '/'
