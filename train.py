@@ -104,6 +104,10 @@ if __name__ == '__main__':
     sch = lr_scheduler.LambdaLR(optimizer, lr_lambda=[lambda1])
     sch_d = lr_scheduler.LambdaLR(optimizer_d, lr_lambda=[lambda1])
     
+    save_dir = 'model/RA-HVED/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
     for i in range(num_epochs):
         epoch_loss = 0.0
         tr_dice = 0.0
@@ -256,26 +260,38 @@ if __name__ == '__main__':
         if i == 0:
             print(f'perf_counter per epoch : {time.strftime("%H:%M:%S", time.gmtime(perf_counter))}')
             print(f'process_time per epoch : {time.strftime("%H:%M:%S", time.gmtime(process_time))}')
-
+        
+        mesg = ''
         if i<5 or (i + 1) % print_every == 0:
-            print('Epoch [{}/{}], Train_Loss: {:.4f}, Train_dice: {:.4f}, Train_wt_dice: {:.4f}, Train_tc_dice: {:.4f}, Train_ec_dice: {:.4f},\
+            print_mesg = str('Epoch [{}/{}], Train_Loss: {:.4f}, Train_dice: {:.4f}, Train_wt_dice: {:.4f}, Train_tc_dice: {:.4f}, Train_ec_dice: {:.4f},\
                   \nValid_Loss: {:.4f}, Valid_dice: {:.4f}, Valid_wt_dice: {:.4f}, Valid_tc_dice: {:.4f}, Valid_ec_dice: {:.4f},\
                   \nValid_wt_dice: {:.4f}, Valid_tc_dice: {:.4f}, Valid_ec_dice: {:.4f}'
                   .format(i + 1, num_epochs, epoch_loss, tr_dice, tr_wt_dice, tr_tc_dice, tr_ec_dice,
                           va_loss, va_dice, va_wt_dice, va_tc_dice, va_ec_dice,
                          va_wt_dice_m, va_tc_dice_m, va_ec_dice_m))
+            print(print_mesg)
+            mesg += print_mesg + '\n' 
 
         if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
-            print(eval_overlap(ov_validloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
+            print_mesg = str(eval_overlap(ov_validloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
+            print(print_mesg)
+            mesg += print_mesg + '\n' 
         if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
-            print(eval_overlap(ov_trainloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
+            print_mesg = str(eval_overlap(ov_trainloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
+            print(print_mesg)
+            mesg += print_mesg + '\n'
+            
         if (i+1) >= 160 and (i + 1) % 10 == 0:
-            save_dir = dir_name + '/'
             if parallel:
                 m = model.module
             else:
                 m = model
-            torch.save(m.state_dict(), save_dir + str(i+1) + '.pth')#, _use_new_zipfile_serialization=False)
+            torch.save(m.state_dict(), save_dir + str(i+1) + '.pth')
+            
+        if i<5 or (i+1) % log_every == 0:
+            log_name = save_dir + 'eval_log.txt'
+            with open(log_name, "a") as log_file:
+                log_file.write('%s\n' % str(mesg))  # save the message
 
         sch.step()
         sch_d.step()
