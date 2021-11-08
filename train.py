@@ -26,7 +26,7 @@ from BraTSdataset import GBMset
 from utils import subset_idx, seed_everything, init_weights
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
-os.environ["CUDA_VISIBLE_DEVICES"]="3"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 parallel = False
 
 if __name__ == '__main__':
@@ -42,9 +42,9 @@ if __name__ == '__main__':
     x_train_p, x_test_p, y_train_p, y_test_p, idx_train, idx_test = train_test_split(x_p, y_p, indices, test_size=0.2, random_state=20)
     x_train_p, x_valid_p, y_train_p, y_valid_p, idx_train, idx_valid = train_test_split(x_train_p, y_train_p, idx_train, test_size=1/8, random_state=20)
 
-    train_batch = 3
+    train_batch = 1
     crop_size = 112
-    valid_batch = 15
+    valid_batch = 5
     trainset = GBMset(sorted(idx_train), transform=transforms(shift=0.1, flip_prob=0.5, random_crop=crop_size))
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch,
                                               shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
@@ -63,8 +63,8 @@ if __name__ == '__main__':
 
     '''model setting'''
     n_class = 3
-    model = U_HVEDNet3D(1, n_class,  multi_stream = 4, fusion_level = 4,
-                        recon_skip=True, MVAE_reduction=True, final_sigmoid=True, f_maps=16, layer_order='ilc')
+    model = U_HVEDConvNet3D(1, n_class,  multi_stream = 4, fusion_level = 4, shared_recon = False,
+                    recon_skip=True, MVAE_reduction=True, final_sigmoid=True, f_maps=16, layer_order='ilc')
     model.apply(init_weights)
     disc = Discriminator(in_channels=7, ks=4, strides=[1,2,2,2])
     disc.apply(init_weights)
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     model.to(device)
     disc.to(device)
 
-    num_epochs= 300
+    num_epochs= 360
     print_every = 20
     validate_every = 20
     overlapEval_every = 80
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     learning_rate = 0.0001
     weight_decay = 0.00001
     alpha = 0.1 # for adv loss
-    beta = 0.1 # for recon loss
+    beta = 0.2 # for recon loss
     train_loss, train_dice = [], []
     valid_loss, valid_dice = [], []
 
@@ -141,17 +141,21 @@ if __name__ == '__main__':
             syn_m_x = m_recon_outputs
             f_weight = f_outputs.detach()
             f_weight = torch.where(f_weight > 0.5, f_weight, torch.zeros_like(f_weight))
-            f_nested_w = f_weight.mean(1)
+            f_nested_w = f_weight[:,0] # WT
+            f_nested_w[f_weight[:,1] > 0.5] = f_weight[:,1][f_weight[:,1] > 0.5] # TC
+            f_nested_w[f_weight[:,2] > 0.5] = f_weight[:,2][f_weight[:,2] > 0.5] # ET
 
             m_weight = m_outputs.detach()
             m_weight = torch.where(m_weight > 0.5, m_weight, torch.zeros_like(m_weight))
-            m_nested_w = m_weight.mean(1)
+            m_nested_w = m_weight[:,0] # WT
+            m_nested_w[m_weight[:,1] > 0.5] = m_weight[:,1][m_weight[:,1] > 0.5] # TC
+            m_nested_w[m_weight[:,2] > 0.5] = m_weight[:,2][m_weight[:,2] > 0.5] # ET
 
             atten_f_x = syn_f_x*(1 + f_nested_w.unsqueeze(1))
             atten_m_x = syn_m_x*(1 + m_nested_w.unsqueeze(1))
             pred_fake = disc(torch.cat([m_outputs, atten_m_x], 1))
             g_gan = gan_loss(pred_fake, True)
-            loss = dice + 0.4*m_dice + beta*recon + beta*KLD + alpha*g_gan
+            loss = dice + m_dice + beta*recon + beta*KLD + alpha*g_gan
 
             # Backward and optimize
             optimizer.zero_grad()
