@@ -7,7 +7,7 @@ text will be added
 
 ## Training
 ```
-train.py <model_name> <model_epoch> --crop_size 112 --valid_batch 12
+train.py <model_name> --num_epochs 360 --crop_size 112 --train_batch 1 --valid_batch 5
 ```
 ## Evaluation
 ```
