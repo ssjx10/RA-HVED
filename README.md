@@ -1,4 +1,4 @@
-# ROI-Attentive-Heteromodal-Variational-Encoder-Decoder
+# ROI-Attentive-Heteromodal-Variational-Encoder-Decoder for Segmentation with Missing Modalities
 Region-of-interest Attentive Heteromodal Variational Encoder-Decoder for Segmentation with Missing Modalities
 
 text will be added
@@ -7,9 +7,9 @@ text will be added
 
 ## Training
 ```
-train.py <model_name> --num_epochs 360 --crop_size 112 --train_batch 1 --valid_batch 5
+python train.py <model_name> --num_epochs 360 --crop_size 112 --train_batch 1 --valid_batch 5
 ```
 ## Evaluation
 ```
-test.py <model_name> <model_epoch> --crop_size 112 --valid_batch 12
+python test.py <model_name> <model_epoch> --crop_size 112 --valid_batch 12
 ```
