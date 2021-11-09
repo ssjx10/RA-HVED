@@ -3,9 +3,9 @@ Region-of-interest Attentive Heteromodal Variational Encoder-Decoder for Segment
 
 text will be added
 
-# Data Preparation
+## Data Preparation
 
-# Training
+## Training
 
-# Evaluation
-test.py <model_name> <model_epoch> --crop_size 112 --valid_batch 12
+## Evaluation
+'test.py <model_name> <model_epoch> --crop_size 112 --valid_batch 12'
