@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+import argparse
 import numpy as np
 import random
 import pandas as pd
@@ -27,24 +28,48 @@ from utils import subset_idx, seed_everything, init_weights
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
-parallel = False
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train a model")
+    parser.add_argument("model_name", help="model for train")
+    parser.add_argument("--num_epochs", type=int, default=360, help="total epochs")
+    parser.add_argument("--learning_rate", type=float, default=0.0001, help="initial learning rate")
+    parser.add_argument("--weight_adv", type=float, default=0.1, help="weight for adversarial loss")
+    parser.add_argument("--weight_vae", type=float, default=0.2, help="weight for VAE loss")
+    parser.add_argument("--validate_every", type=int, default=20, help="validate&print the model every # epochs")
+    parser.add_argument("--overlapEval_every", type=int, default=80, help="overlapEval&print every # epochs")
+    parser.add_argument("--save_every", type=int, default=20, help="save the model every # epochs")
+    parser.add_argument("--save_dir", default='model', help="the dir to save models and logs")
+    parser.add_argument("--crop_size", type=int, default=112, help="patch size for train")
+    parser.add_argument("--train_batch", type=int, default=1, help="train batch size for train")
+    parser.add_argument("--valid_batch", type=int, default=5, help="valid batch size for train")
+    parser.add_argument("--overlapEval", type=bool, default=True, help="overlap evaluation on a subject")
+    parser.add_argument("--d_factor", type=int, default=4, help="stride is crop_size // d_factor")
+    parser.add_argument("--seed", type=int, default=20, help="seed")
+    parser.add_argument("--parallel", type=bool, default=False, help="seed")
+    args = parser.parse_args()
+    
+    return args
 
 if __name__ == '__main__':
+    args = parse_args()
+    seed = args.seed
+    parallel = args.parallel
+    seed_everything(seed)
     
     '''dataload'''
-    seed = 20
-    seed_everything(seed)
     pat_num = 285
     x_p = np.zeros(pat_num,)
     # target value
     y_p = np.zeros(pat_num,)
     indices = np.arange(pat_num)
-    x_train_p, x_test_p, y_train_p, y_test_p, idx_train, idx_test = train_test_split(x_p, y_p, indices, test_size=0.2, random_state=20)
-    x_train_p, x_valid_p, y_train_p, y_valid_p, idx_train, idx_valid = train_test_split(x_train_p, y_train_p, idx_train, test_size=1/8, random_state=20)
+    x_train_p, x_test_p, y_train_p, y_test_p, idx_train, idx_test = train_test_split(x_p, y_p, indices, test_size=0.2, random_state=seed)
+    x_train_p, x_valid_p, y_train_p, y_valid_p, idx_train, idx_valid = train_test_split(x_train_p, y_train_p, idx_train, test_size=1/8, random_state=seed)
 
-    train_batch = 1
-    crop_size = 112
-    valid_batch = 5
+    train_batch = args.train_batch
+    valid_batch = args.valid_batch
+    crop_size = args.crop_size
+    overlap_eval = args.overlap_eval
     trainset = GBMset(sorted(idx_train), transform=transforms(shift=0.1, flip_prob=0.5, random_crop=crop_size))
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch,
                                               shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
@@ -52,17 +77,17 @@ if __name__ == '__main__':
     validset = GBMset(sorted(idx_valid), transform=transforms(random_crop=crop_size), m_full=True)
     validloader = torch.utils.data.DataLoader(validset, batch_size=valid_batch,
                                               shuffle=False, num_workers=2, pin_memory=True)
+    if overlapEval:
+        ov_trainset = GBMset(sorted(idx_train), transform=transforms())
+        ov_trainloader = torch.utils.data.DataLoader(ov_trainset, batch_size=1,
+                                                  shuffle=False, num_workers=4)
 
-    ov_trainset = GBMset(sorted(idx_train), transform=transforms())
-    ov_trainloader = torch.utils.data.DataLoader(ov_trainset, batch_size=1,
-                                              shuffle=False, num_workers=4)
-
-    ov_validset = GBMset(sorted(idx_valid), transform=transforms())
-    ov_validloader = torch.utils.data.DataLoader(ov_validset, batch_size=1,
-                                              shuffle=False, num_workers=4)
+        ov_validset = GBMset(sorted(idx_valid), transform=transforms())
+        ov_validloader = torch.utils.data.DataLoader(ov_validset, batch_size=1,
+                                                  shuffle=False, num_workers=4)
 
     '''model setting'''
-    n_class = 3
+    n_class = args.n_class
     model = U_HVEDConvNet3D(1, n_class,  multi_stream = 4, fusion_level = 4, shared_recon = False,
                     recon_skip=True, MVAE_reduction=True, final_sigmoid=True, f_maps=16, layer_order='ilc')
     model.apply(init_weights)
@@ -76,35 +101,32 @@ if __name__ == '__main__':
     model.to(device)
     disc.to(device)
 
-    num_epochs= 360
-    print_every = 20
-    validate_every = 20
-    overlapEval_every = 80
-    dir_name = 'model'
+    num_epochs= args.num_epochs
+    validate_every = args.validate_every
+    overlapEval_every = args.overlapEval_every
+    save_every = args.save_every
 
-    learning_rate = 0.0001
+    learning_rate = args.learning_rate
     weight_decay = 0.00001
-    alpha = 0.1 # for adv loss
-    beta = 0.2 # for recon loss
+    alpha = args.weight_adv # for adv loss
+    beta = args.weight_vae # for vae loss
     train_loss, train_dice = [], []
     valid_loss, valid_dice = [], []
 
     dice_loss = DiceLoss()
-    wce_loss = ce
     gan_loss = GANLoss().to(device)
-    l1_loss = nn.L1Loss()
+#     l1_loss = nn.L1Loss()
     l2_loss = nn.MSELoss()
     dc = DiceCoefficient()
     dcR = DiceRegion()
-    # optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    optimizer_d = optim.Adam(disc.parameters(), lr=0.0001, weight_decay=weight_decay)
+    optimizer_d = optim.Adam(disc.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     lambda1 = lambda epoch: (1 - epoch / num_epochs)**0.9
     sch = lr_scheduler.LambdaLR(optimizer, lr_lambda=[lambda1])
     sch_d = lr_scheduler.LambdaLR(optimizer_d, lr_lambda=[lambda1])
     
-    save_dir = 'model/RA-HVED/'
+    save_dir = f'{args.save_dir}/{args.model_name}/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     
@@ -262,7 +284,7 @@ if __name__ == '__main__':
             print(f'process_time per epoch : {time.strftime("%H:%M:%S", time.gmtime(process_time))}')
         
         mesg = ''
-        if i<5 or (i + 1) % print_every == 0:
+        if i<5 or (i + 1) % validate_every == 0:
             print_mesg = str('Epoch [{}/{}], Train_Loss: {:.4f}, Train_dice: {:.4f}, Train_wt_dice: {:.4f}, Train_tc_dice: {:.4f}, Train_ec_dice: {:.4f},\
                   \nValid_Loss: {:.4f}, Valid_dice: {:.4f}, Valid_wt_dice: {:.4f}, Valid_tc_dice: {:.4f}, Valid_ec_dice: {:.4f},\
                   \nValid_wt_dice: {:.4f}, Valid_tc_dice: {:.4f}, Valid_ec_dice: {:.4f}'
@@ -281,17 +303,17 @@ if __name__ == '__main__':
             print(print_mesg)
             mesg += print_mesg + '\n'
             
-        if (i+1) >= 160 and (i + 1) % 10 == 0:
+        if (i+1) >= 160 and (i + 1) % save_every == 0:
             if parallel:
                 m = model.module
             else:
                 m = model
             torch.save(m.state_dict(), save_dir + str(i+1) + '.pth')
             
-        if i<5 or (i+1) % log_every == 0:
+        if i < 5 or (i+1) % validate_every == 0:
             log_name = save_dir + 'eval_log.txt'
             with open(log_name, "a") as log_file:
-                log_file.write('%s\n' % str(mesg))  # save the message
+                log_file.write('%s' % str(mesg))  # save the message
 
         sch.step()
         sch_d.step()
