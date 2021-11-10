@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from itertools import chain, combinations
 
 from unet import UNet3D, ResidualUNet3D, FusionUNet3D, FusionResUNet3D
-from U_HVED import U_HVEDNet3D, U_HVEDConvNet3D
+from RA_HVED import U_HVEDNet3D, U_HVEDConvNet3D
 from transform import transforms
 from evaluation import eval_overlap_save, eval_overlap, eval_overlap_recon
 from utils import seed_everything, all_subsets
@@ -28,7 +28,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Test a model")
     parser.add_argument("model_name", help="model name for test")
     parser.add_argument("epoch", type=int, help="model epoch")
-    parser.add_argument("--n_class", type=int, default=3, help="the number of class")
+    parser.add_argument("--n_class", type=int, default=3, help="number of class")
+    parser.add_argument("--save_dir", default='model', help="the dir to save models and logs")
     parser.add_argument("--crop_size", type=int, default=112, help="patch size for inference")
     parser.add_argument("--valid_batch", type=int, default=12, help="batch size for inference")
     parser.add_argument("--d_factor", type=int, default=4, help="stride is crop_size // d_factor ")
@@ -40,7 +41,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print(args.model_name, args.epoch, args.seed)
+    print('Test', args.model_name, 'epoch', args.epoch)
     seed = args.seed
     crop_size = args.crop_size
     valid_batch = args.valid_batch
@@ -65,7 +66,7 @@ def main():
                     recon_skip=True, MVAE_reduction=False, final_sigmoid=True, f_maps=8, layer_order='ilc')
     model_name = args.model_name
     epoch = args.epoch
-    model.load_state_dict(torch.load(f'model/{model_name}/{epoch}.pth')) 
+    model.load_state_dict(torch.load(f'{args.save_dir}/{model_name}/{epoch}.pth')) 
     model.eval()
     model.cuda()
     

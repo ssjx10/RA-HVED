@@ -18,7 +18,7 @@ import torch.nn.init as init
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
 
-from U_HVED import Discriminator, U_HVEDNet3D
+from RA_HVED import Discriminator, U_HVEDNet3D, U_HVEDConvNet3D
 from transform import transforms, SegToMask
 from loss import DiceLoss, WeightedCrossEntropyLoss, GeneralizedDiceLoss, GANLoss, compute_KLD, compute_KLD_drop
 from metrics import MeanIoU, DiceCoefficient, DiceRegion
@@ -27,12 +27,12 @@ from BraTSdataset import GBMset
 from utils import subset_idx, seed_everything, init_weights
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a model")
     parser.add_argument("model_name", help="model for train")
     parser.add_argument("--num_epochs", type=int, default=360, help="total epochs")
+    parser.add_argument("--n_class", type=int, default=3, help="number of classes")
     parser.add_argument("--learning_rate", type=float, default=0.0001, help="initial learning rate")
     parser.add_argument("--weight_adv", type=float, default=0.1, help="weight for adversarial loss")
     parser.add_argument("--weight_vae", type=float, default=0.2, help="weight for VAE loss")
@@ -47,15 +47,22 @@ def parse_args():
     parser.add_argument("--d_factor", type=int, default=4, help="stride is crop_size // d_factor")
     parser.add_argument("--seed", type=int, default=20, help="seed")
     parser.add_argument("--parallel", type=bool, default=False, help="seed")
+    parser.add_argument("--gpus", type=int, default=1, help="number of gpus")
     args = parser.parse_args()
     
     return args
 
-if __name__ == '__main__':
+
+def main():
     args = parse_args()
     seed = args.seed
-    parallel = args.parallel
     seed_everything(seed)
+    parallel = args.parallel
+    count_gpu = torch.cuda.device_count()
+    if parallel:
+        args.train_batch *= count_gpu
+        args.valid_batch *= count_gpu
+    print('Train', args.model_name, 'total_epochs :', args.num_epochs, 'parallel :', parallel, 'num_gpus :', count_gpu)
     
     '''dataload'''
     pat_num = 285
@@ -69,14 +76,14 @@ if __name__ == '__main__':
     train_batch = args.train_batch
     valid_batch = args.valid_batch
     crop_size = args.crop_size
-    overlap_eval = args.overlap_eval
+    overlapEval = args.overlapEval
     trainset = GBMset(sorted(idx_train), transform=transforms(shift=0.1, flip_prob=0.5, random_crop=crop_size))
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=train_batch,
                                               shuffle=True, drop_last=True, num_workers=4, pin_memory=True)
 
     validset = GBMset(sorted(idx_valid), transform=transforms(random_crop=crop_size), m_full=True)
     validloader = torch.utils.data.DataLoader(validset, batch_size=valid_batch,
-                                              shuffle=False, num_workers=2, pin_memory=True)
+                                              shuffle=False, drop_last=True, num_workers=2, pin_memory=True)
     if overlapEval:
         ov_trainset = GBMset(sorted(idx_train), transform=transforms())
         ov_trainloader = torch.utils.data.DataLoader(ov_trainset, batch_size=1,
@@ -293,15 +300,16 @@ if __name__ == '__main__':
                          va_wt_dice_m, va_tc_dice_m, va_ec_dice_m))
             print(print_mesg)
             mesg += print_mesg + '\n' 
-
-        if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
-            print_mesg = str(eval_overlap(ov_validloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
-            print(print_mesg)
-            mesg += print_mesg + '\n' 
-        if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
-            print_mesg = str(eval_overlap(ov_trainloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
-            print(print_mesg)
-            mesg += print_mesg + '\n'
+        
+        if overlapEval:
+            if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
+                print_mesg = str(eval_overlap(ov_validloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
+                print(print_mesg)
+                mesg += print_mesg + '\n' 
+            if (i + 1) == num_epochs or (i + 1) % overlapEval_every == 0:
+                print_mesg = str(eval_overlap(ov_trainloader, model, patch_size=crop_size, overlap_stepsize=crop_size//2, batch_size=valid_batch, num_classes=3))
+                print(print_mesg)
+                mesg += print_mesg + '\n'
             
         if (i+1) >= 160 and (i + 1) % save_every == 0:
             if parallel:
@@ -318,3 +326,6 @@ if __name__ == '__main__':
         sch.step()
         sch_d.step()
 
+    
+if __name__ == '__main__':
+    main()
