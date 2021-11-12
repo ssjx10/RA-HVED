@@ -6,7 +6,8 @@ text will be added
 ![](images/fig1.png)
 
 ## Data Preparation
-
+- Download the BraTS dataset
+- 
 ## Training
 ```
 python train.py <model_name> --num_epochs 360 --crop_size 112 --train_batch 1 --valid_batch 5
