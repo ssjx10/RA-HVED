@@ -3,7 +3,7 @@ Region-of-interest Attentive Heteromodal Variational Encoder-Decoder for Segment
 
 text will be added
 
-![](./images/fig 1.png)
+![](images/fig 1.png)
 
 ## Data Preparation
 
