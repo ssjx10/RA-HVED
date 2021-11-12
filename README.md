@@ -2,7 +2,7 @@
 Region-of-interest Attentive Heteromodal Variational Encoder-Decoder for Segmentation with Missing Modalities
 
 text will be added
-![](./images/fig1.png)
+![](./images/fig 1.png)
 
 ## Data Preparation
 
