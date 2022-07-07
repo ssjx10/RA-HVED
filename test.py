@@ -63,7 +63,7 @@ def main():
     '''model setting'''
     n_class = args.n_class
     model =  U_HVEDConvNet3D(1, n_class,  multi_stream = 4, fusion_level = 4, shared_recon = False,
-                    recon_skip=True, MVAE_reduction=False, final_sigmoid=True, f_maps=8, layer_order='ilc')
+                    recon_skip=True, MVAE_reduction=True, final_sigmoid=True, f_maps=8, layer_order='ilc')
     model_name = args.model_name
     epoch = args.epoch
     model.load_state_dict(torch.load(f'{args.save_dir}/{model_name}/{epoch}.pth')) 

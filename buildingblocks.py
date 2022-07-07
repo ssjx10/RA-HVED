@@ -82,49 +82,48 @@ class ModalityGate(nn.Module):
     '''
     weight for each modality
     '''
-    def __init__(self, in_channels, in_modalities, pool_types=[]):
+    def __init__(self, in_channels, in_modalities, seg_channels=0, reduction_ratio=4, pool_types=['avg', 'max']):
         super(ModalityGate, self).__init__()
-        kernel_size = 1
-        self.conv = BasicConv(in_channels, in_modalities, kernel_size, stride=1, padding=(kernel_size-1) // 2, relu=False, norm=False)
-#         self.mlp = nn.Sequential(
-#             Flatten(),
-#             nn.Linear(in_channels, in_modalities),
-#             )
+        hidden_channels = in_channels // reduction_ratio
+        total_channels = in_channels + seg_channels
+        self.mlp = nn.Sequential(
+            Flatten(),
+            nn.Linear(total_channels, hidden_channels),
+            nn.ReLU(),
+            nn.Linear(hidden_channels, in_modalities)
+            )
         self.in_modalities = in_modalities
         self.mod_channels = in_channels // in_modalities
         self.pool_types = pool_types
         
-    def forward(self, x):
-        
+    def forward(self, x, x_seg=None):
+        if x_seg is not None:
+            in_x = torch.cat([x, x_seg], 1)
+        else:
+            in_x = x
+            
         att_sum = None
         for pool_type in self.pool_types:
             if pool_type=='avg':
-                avg_pool = F.avg_pool3d( x, (x.size(2), x.size(3), x.size(4)), stride=(x.size(2), x.size(3), x.size(4)))
+                avg_pool = F.avg_pool3d( in_x, (in_x.size(2), in_x.size(3), in_x.size(4)), stride=(in_x.size(2), in_x.size(3), in_x.size(4)))
                 att_raw = self.mlp( avg_pool )
-#                 avg_mod = []
-#                 for mod_x in x:
-#                     avg_mod.append( torch.mean(mod_x,1).unsqueeze(1) )
-#                 avg_mod = torch.cat(avg_mod, 1)
-#                 att_raw = self.conv( avg_mod )
             elif pool_type=='max':
-                max_pool = F.max_pool3d( x, (x.size(2), x.size(3), x.size(4)), stride=(x.size(2), x.size(3), x.size(4)))
+                max_pool = F.max_pool3d( in_x, (in_x.size(2), in_x.size(3), in_x.size(4)), stride=(in_x.size(2), in_x.size(3), in_x.size(4)))
                 att_raw = self.mlp( max_pool )
-#                 max_mod = []
-#                 for mod_x in x:
-#                     max_mod.append( torch.max(mod_x,1)[0].unsqueeze(1) )
-#                 max_mod = torch.cat(max_mod, 1)
-#                 att_raw = self.conv( max_mod )
         
             if att_sum is None:
                 att_sum = att_raw
             else:
                 att_sum = att_sum + att_raw
         
-        att_sum = self.conv(x)
-        scale = F.sigmoid(att_sum )
+        scale = F.sigmoid(att_sum)
         scaled_x = []
         for i in range(self.in_modalities):
-            scaled_x.append(x[:, self.mod_channels*i:self.mod_channels*(i+1)]*scale[:, i:i+1])
+            mod_x = x[:, self.mod_channels*i:self.mod_channels*(i+1)]
+            mod_scale = scale[:, i:i+1].unsqueeze(2).unsqueeze(3).unsqueeze(4).expand_as(mod_x)
+            scaled_x.append(mod_x*mod_scale)
+        
+#         scaled_x = torch.cat(scaled_x, 1)
             
         return scaled_x
 
@@ -139,116 +138,169 @@ class ChannelPool(nn.Module):
         return torch.cat( (torch.max(x,1)[0].unsqueeze(1), torch.mean(x,1).unsqueeze(1)), dim=1 )
 
 class SpatialGate(nn.Module):
-    def __init__(self):
+    def __init__(self, prob=False):
         super(SpatialGate, self).__init__()
         kernel_size = 7
         self.compress = ChannelPool()
-        self.spatial = BasicConv(2, 1, kernel_size, stride=1, padding=(kernel_size-1) // 2, relu=False)
+        in_cha = 2
+        if prob:
+            in_cha += 3
+        self.spatial = BasicConv(in_cha, 1, kernel_size, stride=1, padding=(kernel_size-1) // 2, relu=False)
 #         self.spatial2 = BasicConv(2, 1, 3, stride=1, padding=(3-1) // 2, relu=False)
-    def forward(self, x):
+    def forward(self, x, prob=None):
         x_compress = self.compress(x)
+        if prob is not None:
+            x_compress = torch.cat([x_compress, prob], 1)
         x_out = self.spatial(x_compress)
-#         x_out2 = self.spatial2(x_compress)
         scale = F.sigmoid(x_out) # broadcasting
 #         scale = x_out
     
         return x*scale
 
-class CBAM(nn.Module):
-    def __init__(self, in_channels, gate_channels=None, comp_ratio=1, reduction_ratio=16, pool_types=['avg', 'max'], no_spatial=False):
-        super(CBAM, self).__init__()
-        self.ChannelGate_prev = None
-        self.SpatialGate_prev = None
-        if gate_channels == None:
-            if comp_ratio == 1:
-                gate_channels = in_channels
-                self.compress = None
-            else:
-                # 1/4
-                gate_channels = in_channels
-                self.compress = BasicConv(in_channels, in_channels // comp_ratio, 1, stride=1)
-                
-        else:
-            self.compress = BasicConv(in_channels, gate_channels, 1, stride=1)
-#             self.SpatialGate_prev = SpatialGate()
-#             self.ChannelGate_prev = ChannelGate(in_channels - gate_channels, reduction_ratio, pool_types)
+class FusionModule(nn.Module):
+    def __init__(self, in_channels, gate_channels=None, mode='ch', in_modalities=4, reduction_ratio=4, pool_types=['avg', 'max']):
+        super(FusionModule, self).__init__()
+        
+        if gate_channels is None:
+            gate_channels = in_channels
         ############### 확인 gate_channels #######
-        self.ChannelGate = ChannelGate(gate_channels, reduction_ratio, pool_types)
-        self.no_spatial=no_spatial
-        if not no_spatial:
-            self.SpatialGate = SpatialGate()
-#             self.SpatialGate2 = SpatialGate()
-    def forward(self, x, x_prev=None, spa_info=None):
-#         max_x = []
-#         mean_x = []
-#         for mx in x:
-#             max_x.append( torch.max(mx,1)[0].unsqueeze(1) )
-#             mean_x.append( torch.mean(mx,1).unsqueeze(1) ) 
-#         max_x = torch.cat(max_x, 1)
-#         mean_x = torch.cat(mean_x, 1)
+        if mode == 'ch':
+            self.gate = ChannelGate(in_channels, reduction_ratio, pool_types)
+        elif mode == 'modal':
+            self.gate = ModalityGate(in_channels, in_modalities, pool_types=pool_types)
+        self.compress = BasicConv(in_channels, gate_channels, 1, stride=1)
+        
+    def forward(self, x):
+
         if type(x) == list:
             x = torch.cat(x, 1)
+        x_ch = self.gate(x)
         
-        x_ch = self.ChannelGate(x)
-        
-        if self.SpatialGate_prev is not None:
-            x_prev = self.SpatialGate_prev(x_prev)
-        
-        if self.ChannelGate_prev is not None:
-#             x = torch.cat([x, x_prev], 1)
-            x_prev = self.ChannelGate_prev(x_prev)
-            
+        if type(x_ch) == list:
+            out = torch.cat(x_ch, 1)
         if self.compress is not None:
-            if x_prev is not None:
-                x = torch.cat([x, x_prev], 1)
-            x = self.compress(x)
-        
-        if not self.no_spatial:
-            if spa_info is None:
-                x_spa = self.SpatialGate(x_ch)
-            else:
-                x_spa = x_ch*( F.sigmoid(self.SpatialGate(x_ch) + spa_info) )
-            
-#             x_out = (x_ch + x_spa)
-            return x_spa, x_ch
-        else:
-            
-            return x_ch, None
-
-class MCBAM(nn.Module):
-    def __init__(self, in_channels, in_modalities=4, pool_types=['avg', 'max'], no_spatial=False):
-        super(MCBAM, self).__init__()
-        self.ModalityGate = ModalityGate(in_channels, in_modalities)
-        self.in_modalities = in_modalities
-        self.mod_channels = in_channels // in_modalities
-        self.no_spatial=no_spatial
-        if not no_spatial:
-            self.SpatialGate = SpatialGate()
-            
-    def forward(self, x, x_prev=None):
-        
-        x = torch.cat(x, 1)
-        x = self.ModalityGate(x)
+            out = self.compress(out)
     
-#         if self.compress is not None:
-#             if x_prev is not None:
-#                 x = torch.cat([x, x_prev], 1)
-#             x = self.compress(x)
         
-        if not self.no_spatial:
-            x = torch.cat(x, 1)
-            x_out = self.SpatialGate(x)
+        return out, x_ch
+
+    
+class AttenModule(nn.Module): # feature-level constraints
+    def __init__(self, cat_channels, in_channels, reduction_ratio=4, pool_types=['avg', 'max']):
+        super(AttenModule, self).__init__()
+        
+        # spas
+        kernel_size = 7
+        self.compress = ChannelPool()
+        in_cha = 2
+        self.expan = 4
+        self.enc_out_ch = 4
+        self.recon_spatial = nn.Conv3d(in_cha*5, self.expan*in_cha*5, kernel_size, stride=1, padding=(kernel_size-1) // 2, groups=in_cha*5)
+        self.recon_spatial2 = nn.Conv3d(self.expan*in_cha*5, 4, 1, stride=1)
+        self.enc_spatial = nn.Conv3d(in_cha*5, self.expan*in_cha*5, kernel_size, stride=1, padding=(kernel_size-1) // 2, groups=in_cha*5)
+        self.enc_spatial2 = nn.Conv3d(self.expan*in_cha*5, self.enc_out_ch, 1, stride=1)
+        self.seg_spatial = nn.Conv3d(in_cha, self.expan*in_cha, kernel_size, stride=1, padding=(kernel_size-1) // 2, groups=in_cha)
+        self.seg_spatial2 = nn.Conv3d(self.expan*in_cha, 1, 1, stride=1)
+#         self.input_comp = BasicConv(in_channels*4, in_channels // 2, 1, stride=1) # MVAE_org
+#         self.input_comp = BasicConv(in_channels*4, in_channels, 1, stride=1) # base U_net
+        self.input_comp = BasicConv(in_channels*2, in_channels, 1, stride=1) # base U_net (recon / 2)
+#         self.input_comp = BasicConv(in_channels, in_channels, 1, stride=1) # base U_net (recon / 4)
+#         self.input_comp2 = BasicConv(in_channels*2, in_channels, 1, stride=1) # base U_net (scale // 2)
+        
             
-            # for u-hved
-            x_out_list = []
-            for i in range(self.in_modalities):
-                x_out_list.append(x_out[:, self.mod_channels*i:self.mod_channels*(i+1)])
-                
-            return x_out_list, x
-            
+    def forward(self, seg_x, enc_x, recon_x):
+        
+        spa_comp = self.compress(seg_x)
+        recon_spa = [spa_comp]
+        for i, rx in enumerate(recon_x):
+            recon_spa += [self.compress(rx)]
+        recon_spa = torch.cat(recon_spa, 1)
+        rec_scale = self.recon_spatial(recon_spa)
+        rec_scale = self.recon_spatial2(rec_scale)
+        rec_scale = F.sigmoid(rec_scale)
+        
+        s_recon_x = []
+        for i, rx in enumerate(recon_x):
+            s_recon_x.append(rx + rx*rec_scale[:, i:i+1])
+        if type(s_recon_x) == list:
+            s_recon_x = torch.cat(s_recon_x, 1)
+#         print(seg_x.shape, enc_x[0].shape, s_recon_x.shape)
+        comp_x = self.input_comp(s_recon_x)
+        
+        enc_spa = [spa_comp]
+        for i, ex in enumerate(enc_x):
+            enc_spa += [self.compress(ex)]
+        enc_spa = torch.cat(enc_spa, 1)
+        enc_scale = self.enc_spatial(enc_spa)
+        enc_scale = self.enc_spatial2(enc_scale)
+        enc_scale = F.sigmoid(enc_scale)
+        s_enc_x = []
+        if self.enc_out_ch == 4:
+            for i, ex in enumerate(enc_x):
+                s_enc_x.append(ex + ex*enc_scale[:, i:i+1])
+            s_enc_x = torch.cat(s_enc_x, 1)
+#             s_enc_x = self.input_comp2(s_enc_x) # scale // 2
         else:
-            return x, None
-       
+            s_enc_x = enc_x + enc_x*enc_scale
+#         print('s', s_enc_x.shape, seg_x.shape, comp_x.shape, )
+        scaled_recon_x = comp_x + s_enc_x
+        
+        
+        seg_scale = self.seg_spatial(spa_comp)
+        seg_scale = self.seg_spatial2(seg_scale)
+        seg_scale = F.sigmoid(seg_scale) # broadcasting
+        
+        scaled_seg_x = seg_x * (1+seg_scale)
+            
+        x = torch.cat([scaled_seg_x, scaled_recon_x], 1)
+        
+        return x
+    
+class AttenModule2(nn.Module): # feature-level constraints
+    """
+        for U-HVED
+    """
+    def __init__(self, cat_channels, in_channels, reduction_ratio=4, pool_types=['avg', 'max']):
+        super(AttenModule2, self).__init__()
+        
+        # spa
+        kernel_size = 7
+        self.compress = ChannelPool()
+        in_cha = 2
+        self.expan = 4
+        self.enc_spatial = nn.Conv3d(in_cha*2, self.expan*in_cha*2, kernel_size, stride=1, padding=(kernel_size-1) // 2, groups=in_cha*2)
+        self.enc_spatial2 = nn.Conv3d(self.expan*in_cha*2, 1, 1, stride=1)
+        self.seg_spatial = nn.Conv3d(in_cha, self.expan*in_cha, kernel_size, stride=1, padding=(kernel_size-1) // 2, groups=in_cha)
+        self.seg_spatial2 = nn.Conv3d(self.expan*in_cha, 1, 1, stride=1) 
+        
+            
+    def forward(self, seg_x, enc_x, recon_x=None):
+        
+        spa_comp = self.compress(seg_x)
+        
+        enc_spa = [spa_comp, self.compress(enc_x)]
+        enc_spa = torch.cat(enc_spa, 1)
+        enc_scale = self.enc_spatial(enc_spa)
+        enc_scale = self.enc_spatial2(enc_scale)
+        enc_scale = F.sigmoid(enc_scale)
+#         print(seg_x.shape, enc_x.shape, comp_x.shape)
+        s_enc_x = enc_x + enc_x*enc_scale
+    
+        if recon_x is not None:
+            scaled_recon_x = comp_x + s_enc_x
+        else:
+            scaled_recon_x = s_enc_x
+            
+        seg_scale = self.seg_spatial(spa_comp)
+        seg_scale = self.seg_spatial2(seg_scale)
+        seg_scale = F.sigmoid(seg_scale) # broadcasting
+        scaled_seg_x = seg_x * (1+seg_scale)
+            
+        x = torch.cat([scaled_seg_x, scaled_recon_x], 1)
+        
+        return x
+    
+    
 '''
 Fusion Block - end -
 '''
@@ -575,14 +627,16 @@ class Decoder(nn.Module):
             in `DoubleConv` module. See `DoubleConv` for more info.
         num_groups (int): number of groups for the GroupNorm
         padding (int or tuple): add zero-padding added to all three sides of the input
+        RSM : ROI attentive skip connection module
     """
 
     def __init__(self, in_channels, out_channels, conv_kernel_size=3, scale_factor=(2, 2, 2), basic_module=DoubleConv,
-                 conv_layer_order='gcr', num_groups=8, mode='trilinear', padding=1):
+                 conv_layer_order='gcr', num_groups=8, mode='trilinear', padding=1, RSM=False, MVAE=False):
         super(Decoder, self).__init__()
+        
         if basic_module == DoubleConv:
-            # if DoubleConv is the basic_module use interpolation for upsampling and concatenation joining
-            self.upsampling = Upsampling(transposed_conv=False, in_channels=in_channels, out_channels=out_channels,
+            t_conv = False
+            self.upsampling = Upsampling(transposed_conv=t_conv, in_channels=in_channels, out_channels=out_channels,
                                          kernel_size=conv_kernel_size, scale_factor=scale_factor, mode=mode)
             # concat joining
             self.joining = partial(self._joining, concat=True)
@@ -594,7 +648,15 @@ class Decoder(nn.Module):
             self.joining = partial(self._joining, concat=False)
             # adapt the number of in_channels for the ExtResNetBlock
             in_channels = out_channels
+        
+        self.RSM = RSM
+        if RSM:
+            if MVAE:
+                self.atten_module = AttenModule2(in_channels, out_channels)
+            else:
+                self.atten_module = AttenModule(in_channels, out_channels)
 
+        # 128 64 / 96 32 / 48 16
         self.basic_module = basic_module(in_channels, out_channels,
                                          encoder=False,
                                          kernel_size=conv_kernel_size,
@@ -602,17 +664,24 @@ class Decoder(nn.Module):
                                          num_groups=num_groups,
                                          padding=padding)
 
-    def forward(self, encoder_features, x, up_size=None):
+    def forward(self, encoder_features, x, up_size=None, recon_features=None):
+#         print(encoder_features.shape, x.shape)
         x = self.upsampling(encoder_features=encoder_features, x=x, up_size=up_size)
-        if encoder_features is not None:
+        if self.RSM:
+            x = self.atten_module(x, encoder_features, recon_features)
+        elif encoder_features is not None:
             x = self.joining(encoder_features, x)
         x = self.basic_module(x)
+
         return x
 
     @staticmethod
     def _joining(encoder_features, x, concat):
         if concat:
-            return torch.cat((encoder_features, x), dim=1)
+            if type(encoder_features) == list:
+                return torch.cat(encoder_features + [x], dim=1)
+            else:
+                return torch.cat((encoder_features, x), dim=1)
         else:
             return encoder_features + x
 
@@ -652,7 +721,10 @@ class Upsampling(nn.Module):
 
     def forward(self, encoder_features, x, up_size):
         if encoder_features is not None:
-            output_size = encoder_features.size()[2:]
+            if type(encoder_features) == list:
+                output_size = encoder_features[0].size()[2:]
+            else:
+                output_size = encoder_features.size()[2:]
         else:
             output_size = up_size
         if self.conv1 is not None:

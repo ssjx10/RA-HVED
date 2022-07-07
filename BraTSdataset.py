@@ -125,9 +125,14 @@ def normalize(x):
         p_std = np.zeros(4)
         trans_x = np.transpose(x, (1,2,3,0))
         
-#         X_normal = np.where(trans_x != 0, (trans_x - np.mean(trans_x[trans_x[:,:,:,0] != 0], 0)) / np.std(trans_x[trans_x[:,:,:,0] != 0], 0), 0)
-        X_normal = (trans_x - np.mean(trans_x[trans_x[:,:,:,0] != 0], 0)) / (np.std(trans_x[trans_x[:,:,:,0] != 0], 0))
-
+        X_normal = (trans_x - np.mean(trans_x[trans_x[:,:,:,0] != 0], 0)) / ((np.std(trans_x[trans_x[:,:,:,0] != 0], 0)) + 1e-6)
+        
+        # min_max range(-1, 1)
+#         cutoff = np.percentile(trans_x, (0, 99))
+#         trans_x = np.clip(trans_x, *cutoff)
+#         X_normal = (trans_x - np.min(trans_x)) / (np.max(trans_x) - np.min(trans_x))
+#         X_normal = X_normal * 2 + -1
+        
         return np.transpose(X_normal, (3,0,1,2))
 
 class ISLESset(Dataset):
@@ -248,8 +253,8 @@ class GBMset(Dataset):
         X = self.X[idx]
         mask = self.mask[idx]
         '''for (W,H,D)'''
-#         X = X.transpose(0,2,1,3) # (H,W,D)240.240,155 -> (W,H,D)240,240,155
-#         mask = mask.transpose(1,0,2) # (H,W,D)240.240,155 -> (W,H,D)240,240,155
+        X = X.transpose(0,2,1,3) # (H,W,D)240.240,155 -> (W,H,D)240,240,155
+        mask = mask.transpose(1,0,2) # (H,W,D)240.240,155 -> (W,H,D)240,240,155
         bg_info = background_info(X)
 #         bg_info = (0,0,0)
         if self.extract:

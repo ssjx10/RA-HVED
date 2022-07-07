@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument("--valid_batch", type=int, default=5, help="valid batch size for train")
     parser.add_argument("--overlapEval", type=bool, default=True, help="overlap evaluation on a subject")
     parser.add_argument("--d_factor", type=int, default=4, help="stride is crop_size // d_factor")
-    parser.add_argument("--seed", type=int, default=20, help="seed")
+    parser.add_argument("--seed", type=int, default=1, help="seed")
     parser.add_argument("--parallel", type=bool, default=False, help="seed")
     parser.add_argument("--gpus", type=int, default=1, help="number of gpus")
     args = parser.parse_args()
