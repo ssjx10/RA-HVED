@@ -3,7 +3,7 @@ Region-of-interest Attentive Heteromodal Variational Encoder-Decoder for Segment
 
 text will be added
 
-![](images/fig1.png)
+![](images/fig1.jpg)
 
 ## Data Preparation
 - Download the BraTS dataset
